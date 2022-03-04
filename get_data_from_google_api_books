@@ -1,0 +1,126 @@
+#import libraries
+import pandas as pd
+import requests
+from pandas import json_normalize
+
+# set api_key and search query
+api_key = "AIzaSyBx84FIZutSCQNJnIcblb-PEI1OekspXk0"
+value = "inpublisher:Saraiva+Educação"
+
+# Create function get_data that requests data from api and extract the JSON data
+def get_data(value, key, index):
+    #Set api url and api key
+    api_url = "https://www.googleapis.com/books/v1/volumes"
+    
+    #Set up parameter dictionary:
+    params = {"q" : value,
+              "orderBy" : "newest",
+              "maxResults" : 40,
+              "startIndex" : index,
+              "key": key}
+    
+    # Request and extract the JSON data
+    response = requests.get(api_url, params = params)
+    data = response.json()
+    
+    #Return data["items"]
+    return(data["items"])
+
+# Create function get_all that gets all data from Google API and create a obras's DataFrame using function get_data
+def get_all():
+    
+    #Set index to 0
+    i = 0
+    
+    #Create DataFrame obras
+    obras = pd.DataFrame()   
+    
+    #Get all data from Google Books API
+    while True:
+        try:
+            obras = obras.append(get_data(value, api_key, i), ignore_index=True)
+            i = i + 40
+        except:
+            break
+    
+    # Return DataFrame obras with all data
+    return obras
+
+# Function list_to_str takes a string list and transform into a string, separating with ";" and handle with nan values transforming into string "nan
+def list_to_str(lista):
+    
+    #Create list c
+    c = []
+    
+    #iterate over every list in lista and transform it in str, using ";" to separe
+    for i in lista:
+        if type(i) is list:
+            c.append(";".join(i))
+        elif type(i) is float:
+            c.append("nan")
+        c[-1] = c[-1].replace(" e ", ";").replace(" / ", ";")
+    
+    #Return c        
+    return c
+
+# Funcion isbn_13 takes obras_total' "industryIdentifiers", flatt data and retrieve ISBN_13
+def isbn_13(ind_id):
+    
+    #Flatt data
+    isbn_13 = ind_id.apply(lambda x: json_normalize(x))
+    
+    #Retrieve isbn_13
+    isbn_13 = isbn_13.apply(lambda x: str(x[x["type"]=="ISBN_13"]['identifier']).split()[1])
+    
+    #If there's no ISBN_13, return string "nan"
+    isbn_13 = isbn_13.apply(lambda x: x.replace("Name:", "nan"))
+    
+    #Return DataFrame isbn_13
+    return isbn_13
+
+# Function create_tab creates table and export to csv format
+def create_tab(obras):
+    
+    obras_total = pd.DataFrame()
+    
+    # Flatt data of "volumeInfo" and join with obras in obras_total
+    vol = json_normalize(obras["volumeInfo"], errors='ignore')
+    obras_total = obras.join(vol)
+    
+    # Flatt data of "saleInfo" and join with obras_total in obras_total
+    sale = json_normalize(obras["saleInfo"], errors='ignore')
+    obras_total = obras_total.join(sale)
+    
+    # Flatt data of "accessInfo" and join with obras_total in obras_total
+    access = json_normalize(obras["accessInfo"], errors='ignore')
+    obras_total = obras_total.join(access, lsuffix="_l", rsuffix= "_r")
+    
+    # Drop duplicates rows with the same "id", keeping the first observation
+    obras_total.drop_duplicates(subset ="id", keep = 'first', inplace = True)
+    
+    # Create table to export
+    tab = pd.DataFrame() 
+    tab["id"] = obras_total["id"]
+    tab["Título"] = obras_total["title"]
+    tab["ISBN_13"] = isbn_13(obras_total["industryIdentifiers"])
+    tab["Autores"] = list_to_str(obras_total["authors"])
+    tab["Data de Publicação"] = pd.to_datetime(obras_total["publishedDate"])
+    tab["Ano de Publicação"] = tab["Data de Publicação"].dt.year
+    tab["Disponível para Venda"] = obras_total["saleability"].apply(lambda x: True if x == "FOR_SALE" else False)
+    tab["Preço Listado"] = obras_total["listPrice.amount"].apply(lambda x: float(x))
+    tab["Número de Páginas"] = obras_total["pageCount"]
+    tab["Editora"] = obras_total["publisher"]
+    tab["Link Google Books"] = obras_total["canonicalVolumeLink"]
+    tab["EPub Disponível"] = obras_total["epub.isAvailable"]
+    tab["PDF Disponível"] = obras_total["pdf.isAvailable"]
+    tab["Categorias"] = list_to_str(obras_total["categories"])
+    
+    # Export table in csv format
+    tab.to_csv("obras_saraiva_educacao1.csv", index=False, encoding='utf-8')
+    
+    # Return tab
+    return tab
+
+# Run Code
+obras = get_all()
+obras_total = create_tab(obras)
