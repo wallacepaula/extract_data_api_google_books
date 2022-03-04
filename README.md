@@ -1,1 +1,3 @@
-# extract_data_api_google_books
+# Extract Data from API Google Books
+
+Este código extrai dados da API do Google Books
